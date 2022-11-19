@@ -56,14 +56,14 @@ impl FAT {
         let fattype: SupportedFAT;
         let fatsize: u32;
         if cluster_count > FAT16_MAX_CLUSTERS {
-            return Err(VFFError::Other("FAT 32 is not supported".to_string()));
+            return Err(VFFError::Other("FAT 32 is not supported".to_owned()));
         }
         if cluster_count > FAT12_MAX_CLUSTERS {
             fattype = SupportedFAT::FAT16;
             fatsize = cluster_count * 2;
         }
         else {
-            return Err(VFFError::Other("FAT12 is not supported".to_string()));
+            return Err(VFFError::Other("FAT12 is not supported".to_owned()));
         }
         let buf_size = (fatsize + cluster_size - 1) & !(cluster_size - 1);
         let mut clusters = Vec::with_capacity(buf_size as usize);
@@ -74,7 +74,7 @@ impl FAT {
 
     fn get_fat16(&self, index: usize) -> Result<u32> {
         if self.fattype != SupportedFAT::FAT16 {
-            return Err(VFFError::Other("This function should only be called for FAT16".to_string()));
+            return Err(VFFError::Other("This function should only be called for FAT16".to_owned()));
         }
         if let Some(res) = self.clusters.get(index) {
             Ok(*res as u32)
@@ -93,7 +93,7 @@ impl FAT {
         #[allow(unreachable_patterns)]
         match self.fattype {
             SupportedFAT::FAT16 => Ok(self.get_fat16(index)?),
-            _ => Err(VFFError::Other("FAT type not supported".to_string())),
+            _ => Err(VFFError::Other("FAT type not supported".to_owned())),
         }
     }
 
@@ -118,9 +118,9 @@ impl FAT {
         }
         if !self.is_last(current) {
             return Err(VFFError::InvalidData { 
-                context: "FAT chain parsing".to_string(),
-                expected: "The first unused cluster chain should satisfy is_last".to_string(),
-                found: "false".to_string(),
+                context: "FAT chain parsing".to_owned(),
+                expected: "The first unused cluster chain should satisfy is_last".to_owned(),
+                found: "false".to_owned(),
             });
         }
         Ok(chain)
@@ -142,7 +142,7 @@ fn check_header(vff_header: [u8;0x10]) -> Result<VFFHeader> {
     if magic != EXPECTED_FILE_MAGIC {
         return Err(
             VFFError::InvalidData {
-                context: "Check VFF Header: parsing file magic".to_string(),
+                context: "Check VFF Header: parsing file magic".to_owned(),
                 expected: format!("{EXPECTED_FILE_MAGIC:?}"),
                 found: format!("{magic:?}"), 
             }
@@ -235,8 +235,8 @@ impl<F: Read+Seek> Directory<F> {
         if data_len % 32 != 0 {
             return Err(
                 VFFError::InvalidData {
-                    context: "Directory::new".to_string(),
-                    expected: "Construct directory with a multiple of 32 bytes".to_string(),
+                    context: "Directory::new".to_owned(),
+                    expected: "Construct directory with a multiple of 32 bytes".to_owned(),
                     found: format!("Constructed with {data_len} (not multiple of 32")
                 }
             );
