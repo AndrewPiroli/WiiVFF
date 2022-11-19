@@ -309,7 +309,6 @@ impl<F: Read+Seek> Directory<F> {
                     _ => {}
                 }
                 let final_name = prev.clone() + "/" + &entry.nice_full_name();
-                res.push(final_name.clone());
                 let maybe_error = "Directory::get should return another Directory because the entry is marked as one in the FAT".to_owned();
                 #[allow(unused_assignments)]
                 let mut maybe_found = "Placeholder error text";
