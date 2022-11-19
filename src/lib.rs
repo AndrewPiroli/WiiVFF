@@ -4,7 +4,7 @@ use byteorder_pack::UnpackFrom;
 use byteorder::{ReadBytesExt, LittleEndian};
 use bitflags::bitflags;
 
-type Result<T> = std::result::Result<T, VFFError>;
+pub type Result<T> = std::result::Result<T, VFFError>;
 
 const FAT16_MAX_CLUSTERS: u32 = 0xfff5;
 const FAT12_MAX_CLUSTERS: u32 = 0xff5;
