@@ -308,20 +308,25 @@ impl<F: Read+Seek> Directory<F> {
                     "." | ".." => {continue},
                     _ => {}
                 }
-                let final_name = prev + "/" + &entry.nice_full_name();
+                let final_name = prev.clone() + "/" + &entry.nice_full_name();
                 res.push(final_name.clone());
                 let maybe_error = "Directory::get should return another Directory because the entry is marked as one in the FAT".to_owned();
-                let maybe_found: String;
+                #[allow(unused_assignments)]
+                let mut maybe_found = "Placeholder error text";
                 match self.get(entry.nice_name())? {
-                    (Some(dir), _) => {return dir.ls(Some(final_name))},
+                    (Some(dir), _) => {
+                        let directory_recused = dir.ls(Some(final_name))?;
+                        res.extend(directory_recused);
+                        continue;
+                    },
                     (_, Some(_)) => {
-                        maybe_found = "returned file contents".to_owned();
+                        maybe_found = "returned file contents";
                     },
                     _ => {
-                        maybe_found = "returned nothing".to_owned();
+                        maybe_found = "returned nothing";
                     },
                 }
-                return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found });
+                return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found.to_owned() });
             }
             else {
                 let final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
