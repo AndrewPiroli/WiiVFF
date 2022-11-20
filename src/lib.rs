@@ -1,4 +1,4 @@
-use std::{io::{Read, self, Seek}, rc::Rc, cell::RefCell, ops::BitAnd};
+use std::{io::{Read, self, Seek, BufWriter, Write}, rc::Rc, cell::RefCell, ops::BitAnd, fs::File};
 use thiserror::Error;
 use byteorder_pack::UnpackFrom;
 use byteorder::{ReadBytesExt, LittleEndian};
@@ -299,7 +299,10 @@ impl<F: Read+Seek> Directory<F> {
         Ok((None, None))
     }
 
-    pub fn ls(&self, recurse: Option<String>) -> Result<Vec<String>> {
+    pub fn ls(&self, recurse: Option<String>, dump: Option<String>) -> Result<Vec<String>> {
+        if let Some(path) = &dump {
+            std::fs::create_dir_all(path)?;
+        }
         let prev = recurse.unwrap_or_default();
         let mut res: Vec<String> = Vec::new();
         for entry in self.read()? {
@@ -314,7 +317,15 @@ impl<F: Read+Seek> Directory<F> {
                 let mut maybe_found = "Placeholder error text";
                 match self.get(entry.nice_name())? {
                     (Some(dir), _) => {
-                        let directory_recused = dir.ls(Some(final_name))?;
+                        let new_dump = match &dump {
+                            Some(path) => {
+                                let temp = path.to_owned() + "/" + &entry.nice_name();
+                                std::fs::create_dir_all(path)?;
+                                Some(temp)
+                            },
+                            None => None
+                        };
+                        let directory_recused = dir.ls(Some(final_name), new_dump)?;
                         res.extend(directory_recused);
                         continue;
                     },
@@ -328,8 +339,19 @@ impl<F: Read+Seek> Directory<F> {
                 return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found.to_owned() });
             }
             else {
-                let final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
-                res.push(final_name);
+                if let Some(path) = &dump {
+                    if let (None, Some(file_bytes)) = self.get(entry.nice_name())? {
+                        let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
+                        f.write_all(file_bytes.as_slice())?;
+                    }
+                    else {
+                        return Err(VFFError::InvalidData { context: "Directory::ls dumping file get".to_owned(), expected: "Directory::get returns file bytes".to_owned(), found: "None".to_owned() });
+                    }
+                }
+                else {
+                    let final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
+                    res.push(final_name);
+                }
             }
         }
         Ok(res)
@@ -418,8 +440,16 @@ mod test {
     pub fn ls_root_dir() -> Result<()> {
         let f = open()?;
         let (_, root_dir) = VFF::new(f)?;
-        let a = root_dir.ls(None)?;
+        let a = root_dir.ls(None, None)?;
         dbg!(a);
+        Ok(())
+    }
+
+    #[test]
+    pub fn dump_root() -> Result<()> {
+        let f = open()?;
+        let (_, root_dir) = VFF::new(f)?;
+        root_dir.ls(None, Some("/tmp".to_owned()))?;
         Ok(())
     }
 }
