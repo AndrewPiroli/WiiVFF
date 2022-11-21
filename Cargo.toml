@@ -13,3 +13,5 @@ byteorder-pack = "0.1.0"
 clap = { version = "4.0.26", features = ["derive"] }
 thiserror = "1.0.37"
 
+[profile.release]
+lto = true
