@@ -371,7 +371,10 @@ impl<F: Read+Seek> VFF<F> {
         fd.seek(io::SeekFrom::Current(0x10))?; // Seek an aditional 0x10
         let header = check_header(header)?;
         let parsed_fat1 = FAT::new(&mut fd, &header)?;
-        let data_offset = fd.stream_position()? + 0x1000; // We are going to read 0x1000 to get the root dir, but we need the VFF first.
+        let mut root_data = Vec::with_capacity(0x1000);
+        root_data.resize_with(0x1000, Default::default);
+        fd.read_exact(root_data.as_mut_slice())?;
+        let data_offset = fd.stream_position()?;
 
         let ret =
             Rc::new(RefCell::new(VFF {
@@ -380,7 +383,6 @@ impl<F: Read+Seek> VFF<F> {
                 parsed_fat1,
                 data_offset,
         }));
-        let root_data =  ret.borrow_mut().inner_read(0x1000)?;
         let root = Directory::new(ret.clone(), root_data)?;
         Ok((ret, root))
     }
