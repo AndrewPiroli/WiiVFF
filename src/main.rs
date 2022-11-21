@@ -8,7 +8,9 @@ use clap::Parser;
 struct Args {
     src: String,
     #[arg(short, long, value_name = "OUTPUT DIR")]
-    dump: Option<String>
+    dump: Option<String>,
+    #[arg(long)]
+    show_deleted: bool,
 }
 
 pub fn main() -> Result<()> {
@@ -16,7 +18,7 @@ pub fn main() -> Result<()> {
     let file = File::open(args.src)?;
     let dumping = args.dump.is_some();
     let (_, root_dir) = VFF::new(file)?;
-    let res = root_dir.ls(None, args.dump)?;
+    let res = root_dir.ls(None, args.dump, args.show_deleted)?;
     if !dumping {
         eprintln!("Directory Listing:");
         for entry in res {

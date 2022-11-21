@@ -196,6 +196,7 @@ struct DirectoryEntry {
     pub mdate:   u16   ,
     pub start:   u16   ,
     pub size:    u32   ,
+    pub deleted: bool  ,
 }
 
 impl DirectoryEntry {
@@ -206,7 +207,7 @@ impl DirectoryEntry {
         let (ctime, cdate, adate) = <(u16, u16, u16)>::unpack_from_le(&mut cursor)?;
         let (eaindex, mtime, mdate) = <(u16, u16, u16)>::unpack_from_le(&mut cursor)?;
         let (start, size) = <(u16, u32)>::unpack_from_le(&mut cursor)?;
-        Ok(DirectoryEntry { name, ext, attr, rsv, cms, ctime, cdate, adate, eaindex, mtime, mdate, start, size })
+        Ok(DirectoryEntry { name, ext, attr, rsv, cms, ctime, cdate, adate, eaindex, mtime, mdate, start, size, deleted: false })
     }
     pub fn nice_name(&self) -> String {
         String::from_utf8_lossy(&self.name).trim_end().to_owned()
@@ -246,15 +247,17 @@ impl<F: Read+Seek> Directory<F> {
             data,
         })
     }
-    fn read(&self) -> Result<Vec<DirectoryEntry>> {
+    fn read(&self, show_deleted: bool) -> Result<Vec<DirectoryEntry>> {
         let mut files: Vec<DirectoryEntry> = Vec::new();
         for chunk in self.data.chunks_exact(32) {
             let mut chunk = <[u8;32]>::try_from(chunk).unwrap(); // Won't panic because we got our slice from chunks_exact
-            let parsed_entry = DirectoryEntry::from_slice(&mut chunk)?;
+            let mut parsed_entry = DirectoryEntry::from_slice(&mut chunk)?;
             match parsed_entry.name[0] {
-                0x0 | // Free entry marker
-                0xe5  // Erased entry (do we want to show these maybe for recovery??)
-                    => {continue;}
+                0x0 => {continue;} //free entry marker
+                0xe5 => { //deleted entry marker
+                    if !show_deleted {continue;}
+                    parsed_entry.deleted = true;
+                }
                 _ => {},
             }
             if parsed_entry.attr & 0xf == 0xf {
@@ -268,8 +271,8 @@ impl<F: Read+Seek> Directory<F> {
 
     /// This API is awkward because Directory is generic.
     /// Either you get another directory, bytes of a file, or nothing
-    fn get(&self, name: String) -> Result<(Option<Self>, Option<Vec<u8>>)> {
-        for entry in self.read()? {
+    fn get(&self, name: String, show_deleted: bool) -> Result<(Option<Self>, Option<Vec<u8>>)> {
+        for entry in self.read(show_deleted)? {
             let entry_name = &entry.nice_name().to_ascii_lowercase();
             if entry_name == &name.to_ascii_lowercase() { // Match!
                 if entry.attr & DirectoryFlags::A_DIR != 0 { // It's a directory
@@ -299,13 +302,13 @@ impl<F: Read+Seek> Directory<F> {
         Ok((None, None))
     }
 
-    pub fn ls(&self, recurse: Option<String>, dump: Option<String>) -> Result<Vec<String>> {
+    pub fn ls(&self, recurse: Option<String>, dump: Option<String>, show_deleted: bool) -> Result<Vec<String>> {
         if let Some(path) = &dump {
             std::fs::create_dir_all(path)?;
         }
         let prev = recurse.unwrap_or_default();
         let mut res: Vec<String> = Vec::new();
-        for entry in self.read()? {
+        for entry in self.read(show_deleted)? {
             if entry.attr & DirectoryFlags::A_DIR != 0 {
                 match entry.nice_name().as_ref() {
                     "." | ".." => {continue},
@@ -315,7 +318,7 @@ impl<F: Read+Seek> Directory<F> {
                 let maybe_error = "Directory::get should return another Directory because the entry is marked as one in the FAT".to_owned();
                 #[allow(unused_assignments)]
                 let mut maybe_found = "Placeholder error text";
-                match self.get(entry.nice_name())? {
+                match self.get(entry.nice_name(), show_deleted)? {
                     (Some(dir), _) => {
                         let new_dump = match &dump {
                             Some(path) => {
@@ -325,7 +328,7 @@ impl<F: Read+Seek> Directory<F> {
                             },
                             None => None
                         };
-                        let directory_recused = dir.ls(Some(final_name), new_dump)?;
+                        let directory_recused = dir.ls(Some(final_name), new_dump, show_deleted)?;
                         res.extend(directory_recused);
                         continue;
                     },
@@ -339,7 +342,7 @@ impl<F: Read+Seek> Directory<F> {
                 return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found.to_owned() });
             }
             else if let Some(path) = &dump {
-                if let (None, Some(file_bytes)) = self.get(entry.nice_name())? {
+                if let (None, Some(file_bytes)) = self.get(entry.nice_name(), show_deleted)? {
                     let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
                     f.write_all(file_bytes.as_slice())?;
                 }
@@ -348,7 +351,10 @@ impl<F: Read+Seek> Directory<F> {
                 }
             }
             else {
-                let final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
+                let mut final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
+                if entry.deleted {
+                    final_name += " [DELETED]"
+                }
                 res.push(final_name);
             }
         }
