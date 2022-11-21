@@ -2,6 +2,9 @@
 name = "wiivff"
 version = "0.1.0"
 edition = "2021"
+authors = ["Hector Martin", "Andrew Piroli"]
+description = "View and dump VFF (Virtual Fat Filesystem) files used by the Wii console"
+repository = "https://github.com/AndrewPiroli/WiiVFF"
 
 [dependencies]
 bitflags = "1.3.2"

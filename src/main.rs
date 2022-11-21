@@ -4,6 +4,7 @@ use wiivff::{VFF, Result};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
+#[command(author, version, about)]
 struct Args {
     src: String,
     #[arg(short, long, value_name = "OUTPUT DIR")]
