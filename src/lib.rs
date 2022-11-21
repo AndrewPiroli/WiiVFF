@@ -119,8 +119,8 @@ impl FAT {
         if !self.is_last(current) {
             return Err(VFFError::InvalidData { 
                 context: "FAT chain parsing".to_owned(),
-                expected: "The first unused cluster chain should satisfy is_last".to_owned(),
-                found: "false".to_owned(),
+                expected: "The first unused cluster in the chain should satisfy is_last".to_owned(),
+                found: format!("False, the cluster reads: {current:04x}"),
             });
         }
         Ok(chain)
