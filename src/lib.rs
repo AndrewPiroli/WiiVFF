@@ -338,20 +338,18 @@ impl<F: Read+Seek> Directory<F> {
                 }
                 return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found.to_owned() });
             }
-            else {
-                if let Some(path) = &dump {
-                    if let (None, Some(file_bytes)) = self.get(entry.nice_name())? {
-                        let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
-                        f.write_all(file_bytes.as_slice())?;
-                    }
-                    else {
-                        return Err(VFFError::InvalidData { context: "Directory::ls dumping file get".to_owned(), expected: "Directory::get returns file bytes".to_owned(), found: "None".to_owned() });
-                    }
+            else if let Some(path) = &dump {
+                if let (None, Some(file_bytes)) = self.get(entry.nice_name())? {
+                    let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
+                    f.write_all(file_bytes.as_slice())?;
                 }
                 else {
-                    let final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
-                    res.push(final_name);
+                    return Err(VFFError::InvalidData { context: "Directory::ls dumping file get".to_owned(), expected: "Directory::get returns file bytes".to_owned(), found: "None".to_owned() });
                 }
+            }
+            else {
+                let final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
+                res.push(final_name);
             }
         }
         Ok(res)
