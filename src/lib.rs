@@ -195,7 +195,6 @@ struct DirectoryEntry {
     pub size:    u32   ,
 }
 
-#[allow(dead_code)]
 impl DirectoryEntry {
     pub fn from_slice(data: &mut [u8;32]) -> Result<Self> {
         let mut cursor = std::io::Cursor::new(data);
@@ -221,14 +220,12 @@ impl DirectoryEntry {
 }
 
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Directory<F: Read+Seek> {
     vff: Rc<RefCell<VFF<F>>>,
     data: Vec<u8>,
 }
 
-#[allow(dead_code)]
 impl<F: Read+Seek> Directory<F> {
     pub fn new(vff: Rc<RefCell<VFF<F>>>, data: Vec<u8>) -> Result<Self> {
         let data_len = data.len();
@@ -359,7 +356,6 @@ impl<F: Read+Seek> Directory<F> {
 
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct VFF<F: Read+Seek>{
     fd: F,
