@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod test;
+
 use std::{io::{Read, self, Seek, BufWriter, Write}, rc::Rc, cell::RefCell, ops::BitAnd, fs::File};
 use thiserror::Error;
 use byteorder_pack::UnpackFrom;
@@ -408,46 +411,5 @@ impl<F: Read+Seek> VFF<F> {
             ret.extend(self.read_cluster(cluster)?);
         }
         Ok(ret)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    fn open() -> Result<std::fs::File> {
-        Ok(std::fs::File::open("/mnt/c/Users/Andrew/Downloads/cdb.vff")?)
-    }
-
-    #[test]
-    pub fn debug_vff() -> Result<()> {
-        let f = open()?;
-        let (vff, _) = VFF::new(f)?;
-        println!("{vff:?}");
-        Ok(())
-    }
-    
-    #[test]
-    pub fn debug_root_dir() -> Result<()> {
-        let f = open()?;
-        let (_, root_dir) = VFF::new(f)?;
-        println!("{root_dir:?}");
-        Ok(())
-    }
-
-    #[test]
-    pub fn ls_root_dir() -> Result<()> {
-        let f = open()?;
-        let (_, root_dir) = VFF::new(f)?;
-        let a = root_dir.ls(None, None)?;
-        dbg!(a);
-        Ok(())
-    }
-
-    #[test]
-    pub fn dump_root() -> Result<()> {
-        let f = open()?;
-        let (_, root_dir) = VFF::new(f)?;
-        root_dir.ls(None, Some("/tmp".to_owned()))?;
-        Ok(())
     }
 }
