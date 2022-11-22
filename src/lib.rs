@@ -223,8 +223,57 @@ impl ParsedFATEntry {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum DirectoryContent<F: Read+Seek> {
+    Dir(Directory<F>),
+    File(Vec<u8>),
+    NoContent,
+}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct DirectoryEntry<F: Read+Seek> {
+    path: String,
+    name: String,
+    content: DirectoryContent<F>
+}
+
+impl<F: Read+Seek> DirectoryEntry<F> {
+    pub fn make_dir_entry(path: String, name: String, dir: Directory<F>) -> Self {
+        DirectoryEntry { path, name, content: DirectoryContent::Dir(dir) }
+    }
+    pub fn make_file_entry(path: String, name: String, file: Vec<u8>) -> Self {
+        DirectoryEntry { path, name, content: DirectoryContent::File(file) }
+    }
+    pub fn make_empty_file_entry(path: String, name: String) -> Self {
+        Self::make_file_entry(path, name, Vec::with_capacity(0))
+    }
+    pub fn make_no_content(path: String) -> Self {
+        DirectoryEntry { path: path, name: String::with_capacity(0), content: DirectoryContent::NoContent }
+    }
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn file(&self) -> Option<&Vec<u8>> {
+        match &self.content {
+            DirectoryContent::File(f) => Some(f),
+            _ => None
+        }
+    }
+    pub fn dir(&self) -> Option<&Directory<F>> {
+        match &self.content {
+            DirectoryContent::Dir(d) => Some(d),
+            _ => None
+        }
+    }
+    pub fn content(&self) -> &DirectoryContent<F> {
+        &self.content
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Directory<F: Read+Seek> {
     vff: Rc<RefCell<VFF<F>>>,
     data: Vec<u8>,
@@ -271,35 +320,32 @@ impl<F: Read+Seek> Directory<F> {
 
     /// This API is awkward because Directory is generic.
     /// Either you get another directory, bytes of a file, or nothing
-    fn get(&self, name: String, show_deleted: bool) -> Result<(Option<Self>, Option<Vec<u8>>)> {
+    fn get(&self, name: String, show_deleted: bool) -> Result<DirectoryEntry<F>> {
         for entry in self.read(show_deleted)? {
             let entry_name = &entry.nice_name().to_ascii_lowercase();
             if entry_name == &name.to_ascii_lowercase() { // Match!
                 if entry.attr & DirectoryFlags::A_DIR != 0 { // It's a directory
                     let new_data = self.vff.borrow_mut().read_chain(entry.start.into())?;
                     return Ok(
-                        (
-                            Some(Directory::new(self.vff.clone(), new_data)?),
-                            None,
-                        )
+                        DirectoryEntry::make_dir_entry(String::new(), String::new(), Directory::new(self.vff.clone(), new_data)?)
                     );
                 }
                 else if entry.size == 0 { // It's an empty file
-                    return Ok((None, Some(Vec::with_capacity(0))));
+                    return Ok(DirectoryEntry::make_empty_file_entry(String::new(), String::new()));
                 }
                 else {
                     let mut vff = self.vff.borrow_mut();
                     let mut raw = vff.read_chain(entry.start.into())?;
                     raw.truncate(entry.size as usize);
                     drop(vff);
-                    return Ok((
-                        None,
-                        Some(raw)
-                    ));
+
+                    return Ok(
+                        DirectoryEntry::make_file_entry(String::new(), String::new(), raw)
+                    );
                 }
             }
         }
-        Ok((None, None))
+        Ok(DirectoryEntry::make_no_content(String::new()))
     }
 
     pub fn ls(&self, include_deleted: bool) -> Result<Vec<String>> {
@@ -325,8 +371,8 @@ impl<F: Read+Seek> Directory<F> {
                 let maybe_error = "Directory::get should return another Directory because the entry is marked as one in the FAT".to_owned();
                 #[allow(unused_assignments)]
                 let mut maybe_found = "Placeholder error text";
-                match self.get(entry.nice_name(), show_deleted)? {
-                    (Some(dir), _) => {
+                match self.get(entry.nice_name(), show_deleted)?.content {
+                    DirectoryContent::Dir(dir) => {
                         let new_dump = match &dump {
                             Some(path) => {
                                 let temp = path.to_owned() + "/" + &entry.nice_name();
@@ -339,17 +385,13 @@ impl<F: Read+Seek> Directory<F> {
                         res.extend(directory_recused);
                         continue;
                     },
-                    (_, Some(_)) => {
-                        maybe_found = "returned file contents";
-                    },
-                    _ => {
-                        maybe_found = "returned nothing";
-                    },
+                    DirectoryContent::File(_) => {maybe_found = "returned file contents";},
+                    DirectoryContent::NoContent => {maybe_found = "returned nothing";},
                 }
                 return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found.to_owned() });
             }
             else if let Some(path) = &dump {
-                if let (None, Some(file_bytes)) = self.get(entry.nice_name(), show_deleted)? {
+                if let DirectoryContent::File(file_bytes) = self.get(entry.nice_name(), show_deleted)?.content() {
                     std::fs::create_dir_all(path)?;
                     let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
                     f.write_all(file_bytes.as_slice())?;
