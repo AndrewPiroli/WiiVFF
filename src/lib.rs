@@ -360,11 +360,14 @@ impl Directory {
 
     fn do_operation_recursive(&self, dump: Option<String>, show_deleted: bool) -> Result<Vec<String>> {
         let mut res: Vec<String> = Vec::new();
+        // We need to make sure our directory gets added if it's empty
+        // we can't just check the length of the result from read(), because we might filter out a result like '.' or '..'
+        let mut got_ourself = false;
         for entry in self.read(show_deleted)? {
             if entry.attr & DirectoryFlags::A_DIR != 0 {
                 match entry.nice_name().as_ref() {
                     "." | ".." => {continue},
-                    _ => {}
+                    _ => { got_ourself = true; }
                 }
                 let maybe_error = "Directory::get should return another Directory because the entry is marked as one in the FAT".to_owned();
                 #[allow(unused_assignments)]
@@ -389,6 +392,7 @@ impl Directory {
                 return Err(VFFError::InvalidData { context: "Directory::ls get entry from read".to_owned(), expected: maybe_error, found: maybe_found.to_owned() });
             }
             else if let Some(path) = &dump {
+                got_ourself = true;
                 if let DirectoryContent::File(file_bytes) = self.get(entry.nice_name(), show_deleted)?.content() {
                     std::fs::create_dir_all(path)?;
                     let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
@@ -399,12 +403,16 @@ impl Directory {
                 }
             }
             else {
+                got_ourself = true;
                 let mut final_name = self.path.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
                 if entry.deleted {
                     final_name += " [DELETED]"
                 }
                 res.push(final_name);
             }
+        }
+        if !got_ourself {
+            res.push(self.path.to_owned());
         }
         Ok(res)
     }
