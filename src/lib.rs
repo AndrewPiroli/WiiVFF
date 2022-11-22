@@ -277,10 +277,11 @@ impl DirectoryEntry {
 pub struct Directory {
     vff: Rc<RefCell<VFF>>,
     data: Vec<u8>,
+    path: String,
 }
 
 impl Directory {
-    pub fn new(vff: Rc<RefCell<VFF>>, data: Vec<u8>) -> Result<Self> {
+    pub fn new(vff: Rc<RefCell<VFF>>, data: Vec<u8>, path: String) -> Result<Self> {
         let data_len = data.len();
         if data_len % 32 != 0 {
             return Err(
@@ -294,6 +295,7 @@ impl Directory {
         Ok(Directory {
             vff,
             data,
+            path,
         })
     }
     fn read(&self, show_deleted: bool) -> Result<Vec<ParsedFATEntry>> {
@@ -319,16 +321,17 @@ impl Directory {
 
     fn get(&self, name: String, show_deleted: bool) -> Result<DirectoryEntry> {
         for entry in self.read(show_deleted)? {
-            let entry_name = &entry.nice_name().to_ascii_lowercase();
-            if entry_name == &name.to_ascii_lowercase() { // Match!
+            let entry_name = entry.nice_name();
+            if entry_name.to_ascii_lowercase() == name.to_ascii_lowercase() { // Match!
                 if entry.attr & DirectoryFlags::A_DIR != 0 { // It's a directory
                     let new_data = self.vff.borrow_mut().read_chain(entry.start.into())?;
+                    let path = self.path.clone() + "/" + &entry_name;
                     return Ok(
-                        DirectoryEntry::make_dir_entry(String::new(), String::new(), Directory::new(self.vff.clone(), new_data)?)
+                        DirectoryEntry::make_dir_entry(self.path.clone(), entry_name.clone(), Directory::new(self.vff.clone(), new_data, path)?)
                     );
                 }
                 else if entry.size == 0 { // It's an empty file
-                    return Ok(DirectoryEntry::make_empty_file_entry(String::new(), String::new()));
+                    return Ok(DirectoryEntry::make_empty_file_entry(self.path.clone(), entry_name));
                 }
                 else {
                     let mut vff = self.vff.borrow_mut();
@@ -337,26 +340,25 @@ impl Directory {
                     drop(vff);
 
                     return Ok(
-                        DirectoryEntry::make_file_entry(String::new(), String::new(), raw)
+                        DirectoryEntry::make_file_entry(self.path.clone(), entry_name, raw)
                     );
                 }
             }
         }
-        Ok(DirectoryEntry::make_no_content(String::new()))
+        Ok(DirectoryEntry::make_no_content(self.path.clone()))
     }
 
     pub fn ls(&self, include_deleted: bool) -> Result<Vec<String>> {
-        self.do_operation_recursive(None, None, include_deleted)
+        self.do_operation_recursive(None, include_deleted)
     }
 
     pub fn dump(&self, dump_location: String, include_deleted: bool) -> Result<()> {
         std::fs::create_dir_all(&dump_location)?;
-        self.do_operation_recursive(None, Some(dump_location), include_deleted)?;
+        self.do_operation_recursive(Some(dump_location), include_deleted)?;
         Ok(())
     }
 
-    fn do_operation_recursive(&self, recurse: Option<String>, dump: Option<String>, show_deleted: bool) -> Result<Vec<String>> {
-        let prev = recurse.unwrap_or_default();
+    fn do_operation_recursive(&self, dump: Option<String>, show_deleted: bool) -> Result<Vec<String>> {
         let mut res: Vec<String> = Vec::new();
         for entry in self.read(show_deleted)? {
             if entry.attr & DirectoryFlags::A_DIR != 0 {
@@ -364,7 +366,6 @@ impl Directory {
                     "." | ".." => {continue},
                     _ => {}
                 }
-                let final_name = prev.clone() + "/" + &entry.nice_full_name();
                 let maybe_error = "Directory::get should return another Directory because the entry is marked as one in the FAT".to_owned();
                 #[allow(unused_assignments)]
                 let mut maybe_found = "Placeholder error text";
@@ -378,7 +379,7 @@ impl Directory {
                             },
                             None => None
                         };
-                        let directory_recused = dir.do_operation_recursive(Some(final_name), new_dump, show_deleted)?;
+                        let directory_recused = dir.do_operation_recursive(new_dump, show_deleted)?;
                         res.extend(directory_recused);
                         continue;
                     },
@@ -398,7 +399,7 @@ impl Directory {
                 }
             }
             else {
-                let mut final_name = prev.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
+                let mut final_name = self.path.clone() + "/" + &entry.nice_full_name() + & format!(" [{:#06x}]", entry.size);
                 if entry.deleted {
                     final_name += " [DELETED]"
                 }
@@ -441,7 +442,7 @@ impl VFF {
                 parsed_fat1,
                 data_offset,
         }));
-        let root = Directory::new(ret.clone(), root_data)?;
+        let root = Directory::new(ret.clone(), root_data, String::with_capacity(0))?;
         Ok((ret, root))
     }
 
