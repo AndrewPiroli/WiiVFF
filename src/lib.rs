@@ -182,7 +182,7 @@ impl BitAnd<DirectoryFlags> for u8 {
 
 #[derive(Debug)]
 #[allow(dead_code)]
-struct DirectoryEntry {
+struct ParsedFATEntry {
     pub name:    [u8;8],
     pub ext:     [u8;3],
     pub attr:    u8    ,
@@ -199,7 +199,7 @@ struct DirectoryEntry {
     pub deleted: bool  ,
 }
 
-impl DirectoryEntry {
+impl ParsedFATEntry {
     pub fn from_slice(data: &mut [u8;32]) -> Result<Self> {
         let mut cursor = std::io::Cursor::new(data);
         let (name, ext) = <([u8;8], [u8;3])>::unpack_from_le(&mut cursor)?;
@@ -207,7 +207,7 @@ impl DirectoryEntry {
         let (ctime, cdate, adate) = <(u16, u16, u16)>::unpack_from_le(&mut cursor)?;
         let (eaindex, mtime, mdate) = <(u16, u16, u16)>::unpack_from_le(&mut cursor)?;
         let (start, size) = <(u16, u32)>::unpack_from_le(&mut cursor)?;
-        Ok(DirectoryEntry { name, ext, attr, rsv, cms, ctime, cdate, adate, eaindex, mtime, mdate, start, size, deleted: false })
+        Ok(ParsedFATEntry { name, ext, attr, rsv, cms, ctime, cdate, adate, eaindex, mtime, mdate, start, size, deleted: false })
     }
     pub fn nice_name(&self) -> String {
         String::from_utf8_lossy(&self.name).trim_end().to_owned()
@@ -247,11 +247,11 @@ impl<F: Read+Seek> Directory<F> {
             data,
         })
     }
-    fn read(&self, show_deleted: bool) -> Result<Vec<DirectoryEntry>> {
-        let mut files: Vec<DirectoryEntry> = Vec::new();
+    fn read(&self, show_deleted: bool) -> Result<Vec<ParsedFATEntry>> {
+        let mut files: Vec<ParsedFATEntry> = Vec::new();
         for chunk in self.data.chunks_exact(32) {
             let mut chunk = <[u8;32]>::try_from(chunk).unwrap(); // Won't panic because we got our slice from chunks_exact
-            let mut parsed_entry = DirectoryEntry::from_slice(&mut chunk)?;
+            let mut parsed_entry = ParsedFATEntry::from_slice(&mut chunk)?;
             match parsed_entry.name[0] {
                 0x0 => {continue;} //free entry marker
                 0xe5 => { //deleted entry marker
