@@ -1,6 +1,6 @@
 [package]
 name = "wiivff"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Hector Martin", "Andrew Piroli"]
 description = "View and dump VFF (Virtual Fat Filesystem) files used by the Wii console"
