@@ -302,10 +302,17 @@ impl<F: Read+Seek> Directory<F> {
         Ok((None, None))
     }
 
-    pub fn ls(&self, recurse: Option<String>, dump: Option<String>, show_deleted: bool) -> Result<Vec<String>> {
-        if let Some(path) = &dump {
-            std::fs::create_dir_all(path)?;
-        }
+    pub fn ls(&self, include_deleted: bool) -> Result<Vec<String>> {
+        self.do_operation_recursive(None, None, include_deleted)
+    }
+
+    pub fn dump(&self, dump_location: String, include_deleted: bool) -> Result<()> {
+        std::fs::create_dir_all(&dump_location)?;
+        self.do_operation_recursive(None, Some(dump_location), include_deleted)?;
+        Ok(())
+    }
+
+    fn do_operation_recursive(&self, recurse: Option<String>, dump: Option<String>, show_deleted: bool) -> Result<Vec<String>> {
         let prev = recurse.unwrap_or_default();
         let mut res: Vec<String> = Vec::new();
         for entry in self.read(show_deleted)? {
@@ -328,7 +335,7 @@ impl<F: Read+Seek> Directory<F> {
                             },
                             None => None
                         };
-                        let directory_recused = dir.ls(Some(final_name), new_dump, show_deleted)?;
+                        let directory_recused = dir.do_operation_recursive(Some(final_name), new_dump, show_deleted)?;
                         res.extend(directory_recused);
                         continue;
                     },
@@ -343,6 +350,7 @@ impl<F: Read+Seek> Directory<F> {
             }
             else if let Some(path) = &dump {
                 if let (None, Some(file_bytes)) = self.get(entry.nice_name(), show_deleted)? {
+                    std::fs::create_dir_all(path)?;
                     let mut f = BufWriter::new(File::create(path.to_owned() + "/" + &entry.nice_full_name())?);
                     f.write_all(file_bytes.as_slice())?;
                 }

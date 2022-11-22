@@ -16,12 +16,14 @@ struct Args {
 pub fn main() -> Result<()> {
     let args = Args::parse();
     let file = File::open(args.src)?;
-    let dumping = args.dump.is_some();
+
     let (_, root_dir) = VFF::new(file)?;
-    let res = root_dir.ls(None, args.dump, args.show_deleted)?;
-    if !dumping {
+    if let Some(dump_location) = args.dump {
+        root_dir.dump(dump_location, args.show_deleted)?;
+    }
+    else {
         eprintln!("Directory Listing:");
-        for entry in res {
+        for entry in root_dir.ls(args.show_deleted)? {
             println!("{entry}");
         }
     }

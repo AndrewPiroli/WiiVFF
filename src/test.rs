@@ -19,7 +19,7 @@ pub fn vff_header() -> Result<()> {
 pub fn ls_root_dir() -> Result<()> {
     let f = open()?;
     let (_, root_dir) = VFF::new(f)?;
-    let root_dir_contents = root_dir.ls(None, None, false)?;
+    let root_dir_contents = root_dir.ls(false)?;
     assert_eq!(root_dir_contents.len(), 2);
     assert!(root_dir_contents.contains(&"/CDB~1.CON [0x0004]".to_owned()));
     assert!(root_dir_contents.contains(&"/2022/10/15/21/44/HAEA_#1/LOG/2B06C4C3.000 [0x0ca0]".to_owned()));
@@ -34,7 +34,7 @@ pub fn dump_root() -> Result<()> {
         std::fs::remove_dir_all(&temp_dir)?;
     }
     let (_, root_dir) = VFF::new(f)?;
-    root_dir.ls(None, Some(temp_dir.clone()), false)?;
+    root_dir.dump(temp_dir.clone(), false)?;
     let file1 = temp_dir.clone() + "/CDB~1.CON";
     let mut cdb_file: Vec<u8> = Vec::with_capacity(0x4);
     let cdb_file_size = File::open(file1)?.read_to_end(&mut cdb_file)?;
