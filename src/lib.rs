@@ -224,21 +224,21 @@ impl ParsedFATEntry {
 }
 
 #[derive(Debug, Clone)]
-pub enum DirectoryContent<F: Read+Seek> {
-    Dir(Directory<F>),
+pub enum DirectoryContent {
+    Dir(Directory),
     File(Vec<u8>),
     NoContent,
 }
 
 #[derive(Debug, Clone)]
-pub struct DirectoryEntry<F: Read+Seek> {
+pub struct DirectoryEntry {
     path: String,
     name: String,
-    content: DirectoryContent<F>
+    content: DirectoryContent
 }
 
-impl<F: Read+Seek> DirectoryEntry<F> {
-    pub fn make_dir_entry(path: String, name: String, dir: Directory<F>) -> Self {
+impl DirectoryEntry {
+    pub fn make_dir_entry(path: String, name: String, dir: Directory) -> Self {
         DirectoryEntry { path, name, content: DirectoryContent::Dir(dir) }
     }
     pub fn make_file_entry(path: String, name: String, file: Vec<u8>) -> Self {
@@ -262,25 +262,25 @@ impl<F: Read+Seek> DirectoryEntry<F> {
             _ => None
         }
     }
-    pub fn dir(&self) -> Option<&Directory<F>> {
+    pub fn dir(&self) -> Option<&Directory> {
         match &self.content {
             DirectoryContent::Dir(d) => Some(d),
             _ => None
         }
     }
-    pub fn content(&self) -> &DirectoryContent<F> {
+    pub fn content(&self) -> &DirectoryContent {
         &self.content
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Directory<F: Read+Seek> {
-    vff: Rc<RefCell<VFF<F>>>,
+pub struct Directory {
+    vff: Rc<RefCell<VFF>>,
     data: Vec<u8>,
 }
 
-impl<F: Read+Seek> Directory<F> {
-    pub fn new(vff: Rc<RefCell<VFF<F>>>, data: Vec<u8>) -> Result<Self> {
+impl Directory {
+    pub fn new(vff: Rc<RefCell<VFF>>, data: Vec<u8>) -> Result<Self> {
         let data_len = data.len();
         if data_len % 32 != 0 {
             return Err(
@@ -317,10 +317,7 @@ impl<F: Read+Seek> Directory<F> {
         Ok(files)
     }
 
-
-    /// This API is awkward because Directory is generic.
-    /// Either you get another directory, bytes of a file, or nothing
-    fn get(&self, name: String, show_deleted: bool) -> Result<DirectoryEntry<F>> {
+    fn get(&self, name: String, show_deleted: bool) -> Result<DirectoryEntry> {
         for entry in self.read(show_deleted)? {
             let entry_name = &entry.nice_name().to_ascii_lowercase();
             if entry_name == &name.to_ascii_lowercase() { // Match!
@@ -413,16 +410,20 @@ impl<F: Read+Seek> Directory<F> {
 
 }
 
+pub trait ReadSeek: Read+Seek+std::fmt::Debug {}
+impl<T> ReadSeek for T where T: Read+Seek+std::fmt::Debug {}
+
 #[derive(Debug)]
-pub struct VFF<F: Read+Seek>{
-    fd: F,
+pub struct VFF{
+    fd: Box<dyn ReadSeek>,
     header: VFFHeader,
     parsed_fat1: FAT,
     data_offset: u64,
 }
 
-impl<F: Read+Seek> VFF<F> {
-    pub fn new(mut fd: F) -> Result<(Rc<RefCell<Self>>, Directory<F>)> {
+impl VFF {
+    pub fn new(fd: impl ReadSeek+'static) -> Result<(Rc<RefCell<Self>>, Directory)> {
+        let mut fd: Box<dyn ReadSeek> = Box::new(fd);
         let mut header = [0u8;0x10];
         fd.read_exact(&mut header)?;
         fd.seek(io::SeekFrom::Current(0x10))?; // Seek an aditional 0x10
