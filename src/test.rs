@@ -57,3 +57,15 @@ pub fn dump_root() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+pub fn check_file_size_vs_header() -> Result<()> {
+    let mut f = open()?;
+    f.seek(io::SeekFrom::End(0))?;
+    let expected_size = f.stream_position()? as u32;
+    f.seek(io::SeekFrom::Start(0))?;
+    let (vff, _) = VFF::new(f)?;
+    let header = &vff.borrow().header;
+    assert_eq!(header.volume_size, expected_size);
+    Ok(())
+}
