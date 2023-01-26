@@ -248,7 +248,7 @@ impl DirectoryEntry {
         Self::make_file_entry(path, name, Vec::with_capacity(0))
     }
     pub fn make_no_content(path: String) -> Self {
-        DirectoryEntry { path: path, name: String::with_capacity(0), content: DirectoryContent::NoContent }
+        DirectoryEntry { path, name: String::with_capacity(0), content: DirectoryContent::NoContent }
     }
     pub fn path(&self) -> &str {
         &self.path
@@ -327,7 +327,7 @@ impl Directory {
                     let new_data = self.vff.borrow_mut().read_chain(entry.start.into())?;
                     let path = self.path.clone() + "/" + &entry_name;
                     return Ok(
-                        DirectoryEntry::make_dir_entry(self.path.clone(), entry_name.clone(), Directory::new(self.vff.clone(), new_data, path)?)
+                        DirectoryEntry::make_dir_entry(self.path.clone(), entry_name, Directory::new(self.vff.clone(), new_data, path)?)
                     );
                 }
                 else if entry.size == 0 { // It's an empty file
