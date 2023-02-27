@@ -141,7 +141,13 @@ fn check_header(vff_header: [u8;0x10]) -> Result<VFFHeader> {
     let mut cursor = std::io::Cursor::new(vff_header);
     let (magic, _unknown_header_entry, volume_size, cluster_size) = 
         <([u8;4], u32, u32, u16)>::unpack_from_be(&mut cursor)?;
-    let cluster_size = cluster_size * 16; // ?
+    let cluster_size = cluster_size.checked_mul(16).ok_or_else(||
+        return VFFError::InvalidData {
+            context: "Checking VFF Header - Compute cluster size".to_owned(),
+            expected: "cluster_size * 16 should not overflow".to_owned(),
+            found: "Overflow detected".to_owned()
+        }
+    )?;
     if magic != EXPECTED_FILE_MAGIC {
         return Err(
             VFFError::InvalidData {
