@@ -148,6 +148,9 @@ fn check_header(vff_header: [u8;0x10]) -> Result<VFFHeader> {
             found: "Overflow detected".to_owned()
         }
     )?;
+    if cluster_size == 0 {
+        return Err(VFFError::InvalidData { context: "Check VFF Header".to_owned(), expected: "Cluster size != 0".to_owned(), found: "0".to_owned() });
+    }
     if magic != EXPECTED_FILE_MAGIC {
         return Err(
             VFFError::InvalidData {
