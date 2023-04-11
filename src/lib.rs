@@ -196,7 +196,7 @@ impl BitAnd<DirectoryFlags> for u8 {
     type Output = u8;
 
     fn bitand(self, rhs: DirectoryFlags) -> Self::Output {
-        rhs.bits & self
+        rhs.bits() & self
     }
 }
 
