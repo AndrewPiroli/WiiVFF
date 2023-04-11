@@ -7,7 +7,7 @@ Currently does not support .mbx WC24 files (wc24recv.mbx or wc24send.mbx)
 ## List
 
 List the contents of the VFF
-
+```
 Usage: wiivff list [OPTIONS] <SRC>
 
 Arguments:
@@ -16,11 +16,11 @@ Arguments:
 Options:
       --show-deleted  Show deleted
   -h, --help          Print help
-
+```
 ## Dump
 
 Dump the VFF to disk
-
+```
 Usage: wiivff dump [OPTIONS] <SRC> <DEST>
 
 Arguments:
@@ -30,3 +30,4 @@ Arguments:
 Options:
       --show-deleted  Show deleted
   -h, --help          Print help
+```
