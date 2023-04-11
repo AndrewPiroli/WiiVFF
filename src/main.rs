@@ -1,30 +1,48 @@
-use std::fs::File;
-use wiivff::{VFF, Result};
-
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use std::{fs::File, path::PathBuf};
+use wiivff::{Result, VFF};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
-    src: String,
-    #[arg(short, long, value_name = "OUTPUT DIR")]
-    dump: Option<String>,
-    #[arg(long)]
+    #[command(subcommand)]
+    cmd: Commands,
+    #[arg(long, global = true)]
+    /// Show deleted
     show_deleted: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// List the contents of the VFF
+    List {
+        /// The path to the input file (cdb.vff)
+        src: PathBuf,
+    },
+    /// Dump the VFF to disk
+    Dump {
+        /// The path to the input file (cdb.vff)
+        src: PathBuf,
+        /// Path to dump to
+        dest: PathBuf,
+    },
 }
 
 pub fn main() -> Result<()> {
     let args = Args::parse();
-    let file = File::open(args.src)?;
 
-    let (_, root_dir) = VFF::new(file)?;
-    if let Some(dump_location) = args.dump {
-        root_dir.dump(dump_location, args.show_deleted)?;
-    }
-    else {
-        eprintln!("Directory Listing:");
-        for entry in root_dir.ls(args.show_deleted)? {
-            println!("{entry}");
+    match args.cmd {
+        Commands::List { src } => {
+            let file = File::open(src)?;
+            let (_, root_dir) = VFF::new(file)?;
+            for entry in root_dir.ls(args.show_deleted)? {
+                println!("{entry}");
+            }
+        }
+        Commands::Dump { src, dest } => {
+            let file = File::open(src)?;
+            let (_, root_dir) = VFF::new(file)?;
+            root_dir.dump(dest, args.show_deleted)?;
         }
     }
     Ok(())
