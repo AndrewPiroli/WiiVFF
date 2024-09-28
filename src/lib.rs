@@ -496,7 +496,7 @@ impl Directory {
     }
 }
 
-pub trait ReadSeek: Read + Seek + std::fmt::Debug {}
+trait ReadSeek: Read + Seek + std::fmt::Debug {}
 impl<T> ReadSeek for T where T: Read + Seek + std::fmt::Debug {}
 
 #[derive(Debug)]
@@ -508,7 +508,7 @@ pub struct VFF {
 }
 
 impl VFF {
-    pub fn new(fd: impl ReadSeek + 'static) -> Result<(Rc<RefCell<Self>>, Directory)> {
+    pub fn new<T: Read+Seek+std::fmt::Debug+'static>(fd: T) -> Result<(Rc<RefCell<Self>>, Directory)> {
         let mut fd: Box<dyn ReadSeek> = Box::new(fd);
         let mut header = [0u8; 0x10];
         fd.read_exact(&mut header)?;
