@@ -7,10 +7,10 @@ description = "View and dump VFF (Virtual Fat Filesystem) files used by the Wii 
 repository = "https://github.com/AndrewPiroli/WiiVFF"
 
 [dependencies]
-bitflags = "~2.1.0"
-byteorder = "~1.4.3"
+bitflags = "~2.6.0"
+byteorder = "~1.5.0"
 byteorder-pack = "~0.1.0"
-clap = { version = "~4.2.1",default-features = false, features = ["std", "derive", "help", "usage", "suggestions", "error-context"] }
+clap = { version = "~4.5.18",default-features = false, features = ["std", "derive", "help", "usage", "suggestions", "error-context"] }
 thiserror = "~1.0.40"
 
 [profile.release]
