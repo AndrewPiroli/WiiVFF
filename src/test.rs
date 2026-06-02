@@ -1,4 +1,5 @@
 use crate::*;
+use std::io::Read;
 
 fn open() -> Result<std::fs::File> {
     Ok(std::fs::File::open("test_data/cdb.vff")?)

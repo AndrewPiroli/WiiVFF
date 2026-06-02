@@ -2,14 +2,14 @@
 mod test;
 
 use bitflags::bitflags;
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use byteorder_pack::UnpackFrom;
 use std::{
     cell::RefCell,
-    fs::File,
+    fs::{self, File},
     io::{self, BufWriter, Read, Seek, Write},
     ops::BitAnd,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
 };
 use thiserror::Error;
@@ -552,4 +552,315 @@ impl VFF {
         }
         Ok(ret)
     }
+}
+
+// Copied from typical Wii values. todo: ck if Wii software can deviate from this at all
+pub const BUILD_CLUSTER_SIZE: u16 = 0x200;
+pub const BUILD_DEFAULT_VOLUME_SIZE: u32 = 0x0140_0000;
+const ROOT_DIR_CAPACITY: usize = 0x1000 / 32;
+
+fn encode_83_name(filename: &str) -> Result<([u8; 8], [u8; 3])> {
+    let upper = filename.to_ascii_uppercase();
+    let (stem, ext): (&str, &str) = match upper.rfind('.') {
+        Some(dot) => (&upper[..dot], &upper[dot + 1..]),
+        None => (upper.as_str(), ""),
+    };
+    if stem.len() > 8 {
+        return Err(VFFError::Other(format!(
+            "Filename stem '{stem}' is longer than 8 characters and cannot be stored in 8.3 format"
+        )));
+    }
+    if ext.len() > 3 {
+        return Err(VFFError::Other(format!(
+            "Filename extension '{ext}' is longer than 3 characters and cannot be stored in 8.3 format"
+        )));
+    }
+    let mut name8 = [b' '; 8];
+    let mut ext3 = [b' '; 3];
+    name8[..stem.len()].copy_from_slice(stem.as_bytes());
+    ext3[..ext.len()].copy_from_slice(ext.as_bytes());
+    Ok((name8, ext3))
+}
+
+fn encode_dir_name(dirname: &str) -> Result<[u8; 8]> {
+    let upper = dirname.to_ascii_uppercase();
+    if upper.len() > 8 {
+        return Err(VFFError::Other(format!(
+            "Directory name '{upper}' is longer than 8 characters and cannot be stored in 8.3 format"
+        )));
+    }
+    let mut name8 = [b' '; 8];
+    name8[..upper.len()].copy_from_slice(upper.as_bytes());
+    Ok(name8)
+}
+
+/// Write a single 32-byte FAT directory entry into `buf[offset..offset+32]`.
+fn write_dir_entry( buf: &mut Vec<u8>, name8: [u8; 8], ext3: [u8; 3], attr: u8, start_cluster: u16, size: u32) {
+    // todo copy fs metadata
+    buf.extend_from_slice(&name8);   // fn
+    buf.extend_from_slice(&ext3);    // ext
+    buf.push(attr);                  // attr
+    buf.push(0);                     // rsv
+    buf.push(0);                     // cms
+    buf.extend_from_slice(&[0, 0]);  // ctime
+    buf.extend_from_slice(&[0, 0]);  // cdate
+    buf.extend_from_slice(&[0, 0]);  // adate
+    buf.extend_from_slice(&[0, 0]);  // eaindex
+    buf.extend_from_slice(&[0, 0]);  // mtime
+    buf.extend_from_slice(&[0, 0]);  // mdate
+    // start cluster – le u16
+    buf.push((start_cluster & 0xff) as u8);
+    buf.push((start_cluster >> 8) as u8);
+    // size – le u32
+    buf.push((size & 0xff) as u8);
+    buf.push(((size >> 8) & 0xff) as u8);
+    buf.push(((size >> 16) & 0xff) as u8);
+    buf.push(((size >> 24) & 0xff) as u8);
+}
+
+/// Allocate consecutive clusters starting at `next_free`, chaining them
+/// in `fat`, and return the index of the first cluster in the chain.
+/// After the call `next_free` points to the first unused cluster after the chain.
+fn alloc_chain16(fat: &mut Vec<u16>, next_free: &mut u16, n_clusters: usize) -> Result<u16> {
+    if n_clusters == 0 {
+        // empty so no cluster allocated. callers store 0 as start_cluster for size==0.
+        return Ok(0);
+    }
+    let start = *next_free;
+    for i in 0..n_clusters {
+        let cluster = *next_free;
+        if cluster as usize >= fat.len() {
+            return Err(VFFError::Other(
+                "Not enough space in the VFF volume to pack all files".to_owned(),
+            ));
+        }
+        if i + 1 == n_clusters {
+            fat[cluster as usize] = 0xffff; // end-of-chain marker
+        } else {
+            fat[cluster as usize] = cluster + 1; // point to next
+        }
+        *next_free += 1;
+    }
+    Ok(start)
+}
+
+enum BuildFSEntry {
+    File {
+        name8: [u8; 8],
+        ext3: [u8; 3],
+        data: Vec<u8>,
+    },
+    Dir {
+        name8: [u8; 8],
+        children: Vec<BuildFSEntry>,
+    },
+}
+
+// todo fix all the recursion in this project
+fn scan_directory(src_dir: &Path) -> Result<Vec<BuildFSEntry>> {
+    let mut entries: Vec<BuildFSEntry> = Vec::new();
+
+    let mut dir_entries: Vec<_> = fs::read_dir(src_dir)
+        .map_err(|e| VFFError::IOErr(e))?
+        .filter_map(|e| e.ok())
+        .collect();
+    // do we need deterministic output?
+    dir_entries.sort_by_key(|e| e.file_name());
+
+    for entry in dir_entries {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            let name8 = encode_dir_name(&name_str)?;
+            // recurse
+            let children = scan_directory(&path)?;
+            entries.push(BuildFSEntry::Dir { name8, children });
+        } else if ft.is_file() {
+            let (name8, ext3) = encode_83_name(&name_str)?;
+            let data = fs::read(&path)?;
+            entries.push(BuildFSEntry::File { name8, ext3, data });
+        }
+        // Symlinks and anything else are silently skipped.
+    }
+    Ok(entries)
+}
+
+
+/// FAT 16 only - todo genericize to `SupportedFAT`
+struct Build16Ctx {
+    fat: Vec<u16>,
+    idx_free: u16,
+    clusters: Vec<Vec<u8>>,
+    cluster_size: usize,
+}
+
+impl Build16Ctx {
+    fn new(cluster_count: u32) -> Self {
+        let mut fat = vec![0u16; cluster_count as usize];
+        // Reserved entries
+        fat[0] = 0xfff8;
+        fat[1] = 0xffff;
+        Build16Ctx {
+            fat,
+            idx_free: 2,
+            clusters: Vec::new(),
+            cluster_size: BUILD_CLUSTER_SIZE as usize,
+        }
+    }
+
+    /// Returns the first cluster index. 0 == emptry
+    fn store_data(&mut self, data: &[u8]) -> Result<u16> {
+        if data.is_empty() {
+            return Ok(0);
+        }
+        let n = (data.len() + self.cluster_size - 1) / self.cluster_size;
+        let start = alloc_chain16(&mut self.fat, &mut self.idx_free, n)?;
+        let mut remaining = data;
+        for _ in 0..n {
+            let take = remaining.len().min(self.cluster_size);
+            let mut cluster = vec![0u8; self.cluster_size];
+            cluster[..take].copy_from_slice(&remaining[..take]);
+            self.clusters.push(cluster);
+            remaining = &remaining[take..];
+        }
+        Ok(start)
+    }
+
+    /// Returns (start_cluster, dir_bytes_for_dirent_in_parent)
+    fn pack_dir_entries(&mut self, entries: &[BuildFSEntry]) -> Result<(u16, Vec<u8>)> {
+        // First pass: recurse into children so we know their start clusters
+        // before we serialise this directory's entries.
+        let mut dirent_buf: Vec<u8> = Vec::new();
+
+        for entry in entries {
+            match entry {
+                BuildFSEntry::File { name8, ext3, data } => {
+                    let size = data.len() as u32;
+                    let start = self.store_data(data)?;
+                    write_dir_entry(&mut dirent_buf, *name8, *ext3, 0x20, start, size);
+                }
+                BuildFSEntry::Dir { name8, children } => {
+                    let (child_start, child_dir_data) = self.pack_dir_entries(children)?;
+                    let dir_start = self.store_data(&child_dir_data)?;
+                    // The cluster chain start recorded in the parent is where
+                    // the child directory data lives.
+                    let _ = child_start; // (unused – dir_start is the real handle)
+                    write_dir_entry(
+                        &mut dirent_buf,
+                        *name8,
+                        [b' '; 3],
+                        0x10, // A_DIR
+                        dir_start,
+                        0,
+                    );
+                }
+            }
+        }
+
+        // The directory data block must be a multiple of 32 bytes; it already
+        // is because each write_dir_entry emits exactly 32 bytes.  We do NOT
+        // store it here – the caller decides whether this is the root (stored
+        // separately) or a sub-directory (stored via store_data).
+        Ok((0, dirent_buf))
+    }
+}
+
+
+pub fn build_vff(src_dir: &Path, dest: &Path, volume_size: u32) -> Result<()> {
+    let cluster_size = BUILD_CLUSTER_SIZE as u32;
+    if volume_size % cluster_size != 0 {
+        return Err(VFFError::Other(format!(
+            "volume_size ({volume_size:#x}) must be a multiple of cluster_size ({cluster_size:#x})"
+        )));
+    }
+    let cluster_count = volume_size / cluster_size;
+    if cluster_count <= FAT12_MAX_CLUSTERS {
+        return Err(VFFError::Other(
+            "Requested volume size would require FAT12, which is not supported for packing"
+                .to_owned(),
+        ));
+    }
+    if cluster_count > FAT16_MAX_CLUSTERS {
+        return Err(VFFError::Other(
+            "Requested volume size requires FAT32, which is not supported".to_owned(),
+        ));
+    }
+
+    // copy of WC24_GetVFF_FATSize
+    // FAT16: fat_size = cluster_count * 2 bytes, aligned up to cluster_size.
+    let fat_size_bytes: u32 = {
+        let raw = cluster_count * 2;
+        (raw + cluster_size - 1) & !(cluster_size - 1)
+    };
+    let root_entries = scan_directory(src_dir)?;
+    let mut ctx = Build16Ctx::new(cluster_count);
+    let (_, root_dir_data) = ctx.pack_dir_entries(&root_entries)?;
+
+    if root_dir_data.len() > ROOT_DIR_CAPACITY * 32 {
+        return Err(VFFError::Other(format!(
+            "Root directory has {} entries, but only {} fit in a VFF root directory",
+            root_dir_data.len() / 32,
+            ROOT_DIR_CAPACITY
+        )));
+    }
+    // fat_size_bytes / 2 = number of u16 entries to emit.
+    let fat_entries = (fat_size_bytes / 2) as usize;
+    let mut fat_bytes: Vec<u8> = Vec::with_capacity(fat_size_bytes as usize);
+    for i in 0..fat_entries {
+        let val = if i < ctx.fat.len() { ctx.fat[i] } else { 0u16 };
+        fat_bytes.write_u16::<LittleEndian>(val)?;
+    }
+    // FAT2 is an identical copy of FAT1.
+    let fat2_bytes = fat_bytes.clone();
+
+
+    // here we go
+    let out_file = File::create(dest)?;
+    let mut w = BufWriter::new(out_file);
+    // VFF header (big-endian, 0x20 bytes total)
+    // Bytes 0-3: magic 'VFF '
+    w.write_all(&EXPECTED_FILE_MAGIC)?;
+    // Bytes 4-5: byte-order marker (big-endian 0xFEFF)
+    w.write_u16::<BigEndian>(0xFEFF)?;
+    // Bytes 6-7: length field 0x0100 (?)
+    w.write_u16::<BigEndian>(0x0100)?;
+    // Bytes 8-11: total volume size (big-endian u32)
+    w.write_u32::<BigEndian>(volume_size)?;
+    // Bytes 12-13: cluster_size / 16 (big-endian u16) – the raw header field
+    let cluster_size_field = (BUILD_CLUSTER_SIZE / 16) as u16;
+    w.write_u16::<BigEndian>(cluster_size_field)?;
+    // Bytes 14-31: padding
+    w.write_all(&[0u8; 18])?;
+    // FAT1
+    w.write_all(&fat_bytes)?;
+    // FAT2 (redundant copy)
+    w.write_all(&fat2_bytes)?;
+    // Root directory (fixed 0x1000 bytes)
+    let mut root_dir_padded = vec![0u8; 0x1000];
+    let copy_len = root_dir_data.len().min(0x1000);
+    root_dir_padded[..copy_len].copy_from_slice(&root_dir_data[..copy_len]);
+    w.write_all(&root_dir_padded)?;
+    // Data clusters
+    for cluster in &ctx.clusters {
+        w.write_all(cluster)?;
+    }
+
+    // calculate file padding
+    let header_size: u64 = 0x20;
+    let fat_total: u64 = fat_size_bytes as u64 * 2; // two fats hun
+    let root_dir_size: u64 = 0x1000;
+    let cluster_data_written: u64 = ctx.clusters.len() as u64 * BUILD_CLUSTER_SIZE as u64;
+    let bytes_written: u64 = header_size + fat_total + root_dir_size + cluster_data_written;
+    let total: u64 = volume_size as u64;
+    if bytes_written > total { // wtf mode
+        return Err(VFFError::Other(format!(
+            "Data ({bytes_written:#x} bytes) exceeds the requested volume size ({total:#x} bytes)"
+        )));
+    }
+    w.flush()?;
+    // ftruncate to total
+    w.into_inner().unwrap().set_len(total)?;
+    Ok(())
 }
